@@ -83,6 +83,7 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('-a', '--adjs')
     group.add_argument('-l', '--loop')
+    group.add_argument('-g', '--groups')
     parser.add_argument('-p', '--poolsize', type=int, default=25)
     parser.add_argument('-o', '--output')
     parser.add_argument('-t', '--threshold', type=float, default=.85)
@@ -94,25 +95,33 @@ def main():
     else:
         files = args.filelist
     poolsize = min(args.poolsize, len(files))
-    if args.adjs:
-        adjs = readadjs(args.adjs)
-        print(len(adjs))
+    if args.groups:
+        groups = []
+        with open(args.groups) as f:
+            for line in f:
+                group = set(line.split())
+                groups.append(group)
     else:
-        with open(args.loop, 'rb') as f:
-            loop = pickle.load(f)
-            loops = loop['loop']
-            adjs = {t for t, n in loop['adjs'].items() if (n * 2) > loops[t]}
+        if args.adjs:
+            adjs = readadjs(args.adjs)
+            print(len(adjs))
+        elif args.loop:
+            with open(args.loop, 'rb') as f:
+                loop = pickle.load(f)
+                loops = loop['loop']
+                adjs = {t for t, n in loop['adjs'].items() if (n * 2) > loops[t]}                
+        prevs = create_prevs(adjs)
+        groups = list(prevs.values())
     rttls = read_pings(files, poolsize=poolsize)
-    prevs = create_prevs(adjs)
     g = nx.Graph()
-    pb = Progress(len(prevs), 'Creating graph', increment=10000)
-    for group in pb.iterator(prevs.values()):
+    pb = Progress(len(groups), 'Creating graph', increment=10000)
+    for group in pb.iterator(groups):
         for x, y in combinations(group, 2):
             ratio = compare(rttls, x, y, mincommon=args.common)
             if ratio >= args.threshold:
                 g.add_edge(x, y)
     with File2(args.output, 'wt') as f:
-        for i, group in enumerate(nx.connected_components(g), 1):
+        for i, group in enumerate(sorted(nx.connected_components(g), key=-len), 1):
             f.write('node N{}:  {}\n'.format(i, ' '.join(group)))
 
 if __name__ == '__main__':
