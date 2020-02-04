@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 import pickle
 from argparse import ArgumentParser
-from collections import defaultdict
+from collections import defaultdict, Counter
 from itertools import combinations
 from multiprocessing.pool import Pool
 import networkx as nx
+from scipy.special import comb
 
 from traceutils.file2.file2 import File2
 from traceutils.progress import Progress
@@ -17,8 +18,8 @@ def read(filename):
         for r in f:
             for resp in r.responses:
                 if resp.type == ICMPType.echo_reply:
-                    d[r.dst] = resp.reply_ttl
-                    break
+                    d[r.dst] = {'rttl': resp.reply_ttl, 'rtt': resp.rtt}
+                    continue
     return filename, d
 
 def read_pings(files, poolsize=25):
@@ -26,35 +27,40 @@ def read_pings(files, poolsize=25):
     pb = Progress(len(files), 'Reading ping results', callback=lambda: '{:,d}'.format(len(rttls)))
     with Pool(poolsize) as pool:
         for filename, d in pb.iterator(pool.imap_unordered(read, files)):
-            for a, ttl in d.items():
-                rttls[a][filename] = ttl
+            for a, info in d.items():
+                rttls[a][filename] = info
     rttls.default_factory = None
     return rttls
 
-def create_prevs(tuples):
+def create_prevs(tuples, include=None):
     prevs = defaultdict(set)
-    pb = Progress(len(tuples), 'Reading tuples', increment=500000,
-                  callback=lambda: 'P {:,d}'.format(len(prevs)))
+    pb = Progress(len(tuples), 'Reading tuples', increment=500000, callback=lambda: '{:,d}'.format(len(prevs)))
     for x, y in pb.iterator(tuples):
-        prevs[y].add(x)
+        if include is None or x in include:
+            prevs[y].add(x)
     prevs.default_factory = None
     return prevs
 
-def compare(rttls, x, y, mincommon=5):
-    same = 0
-    common = 0
-    if x in rttls and y in rttls:
-        d1 = rttls[x]
-        d2 = rttls[y]
-        if d1 and d2:
-            for k, xres in d1.items():
-                yres = d2.get(k)
-                if yres:
-                    common += 1
-                    if xres == yres:
-                        same += 1
-    if common >= mincommon:
-        return same / common if common > 0 else 0
+def compare(rttls, x, y, target, allowless=False):
+    d1 = rttls.get(x)
+    d2 = rttls.get(y)
+    if d1 and d2:
+        keys = d1.keys() & d2.keys()
+        if len(keys) >= target or allowless:
+            keys = sorted(keys, key=lambda key: min(d1[key]['rtt'], d2[key]['rtt']))
+            same = 0
+            common = 0
+            for k in keys:
+                common += 1
+                xres = d1[k]
+                yres = d2[k]
+                if xres['rttl'] == yres['rttl']:
+                    same += 1
+                    if same == target:
+                        break
+            if same >= target or (allowless and same == common):
+                ratio = same / common if common > 0 else 0
+                return ratio
     return -1
 
 def readfiles(filename):
@@ -74,6 +80,27 @@ def readadjs(filename):
             adj = tuple(line.split())
             adjs.add(adj)
     return adjs
+
+def create_graph(groups, rttls, acct):
+    g = nx.Graph()
+    pb = Progress(len(groups), 'Creating graph', increment=10000)
+    for group in pb.iterator(groups):
+        for x, y in combinations(group, 2):
+            ratio = compare(rttls, x, y, mincommon=args.common)
+            if ratio >= acct:
+                g.add_edge(x, y)
+
+def comb_pairs(groups):
+    return {frozenset(t) for group in groups if len(group) > 1 for t in combinations(group, 2)}
+
+def create_rttl_counter(rttls):
+    counters = defaultdict(Counter)
+    pb = Progress(len(rttls), 'Creating reply TTL counters', increment=10000)
+    for addr, vprttls in pb.iterator(rttls.items()):
+        for vp, d in vprttls.items():
+            counters[vp][d['rttl']] += 1
+    counters.default_factory = None
+    return counters
 
 def main():
     parser = ArgumentParser()
@@ -104,6 +131,8 @@ def main():
             adjs = {t for t, n in loop['adjs'].items() if (n * 2) > loops[t]}
     rttls = read_pings(files, poolsize=poolsize)
     prevs = create_prevs(adjs)
+    groups = [{a for a in group if a in rttls} for group in prevs.values()]
+    groups = [group for group in groups if len(group) > 1]
     g = nx.Graph()
     pb = Progress(len(prevs), 'Creating graph', increment=10000)
     for group in pb.iterator(prevs.values()):
