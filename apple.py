@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import pickle
 from argparse import ArgumentParser
 from collections import defaultdict, Counter

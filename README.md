@@ -11,3 +11,8 @@ The second step is to ping all addresses in the first column from many vantage p
 Pass the resulting warts files to the apple.py script.
 The default acceptance threshold (from the paper) is .78, but you can specify any value between 0 and 1. Higher numbers increase precision, possibly at the expense of recall.
 The output is a list of inferred router nodes, in the same format as CAIDA ITDK nodes files.
+
+## Prerequisites
+- python3
+- scamper
+- traceutils (`pip install traceutils`)
