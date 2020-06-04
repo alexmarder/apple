@@ -115,6 +115,7 @@ def main():
     group.add_argument('-a', '--adjs')
     parser.add_argument('-p', '--poolsize', type=int, default=25)
     parser.add_argument('-o', '--output')
+    parser.add_argument('-t', '--acceptance-threshold', type=float, default=.78, help='The acceptance threshold.')
     args = parser.parse_args()
 
     if args.files:
@@ -145,16 +146,8 @@ def main():
     while birthday(a, r, v) >= 1/a:
         v += 1
     print('Set v={}'.format(v))
-    # g = nx.Graph()
-    # pb = Progress(len(groups), 'Creating graph', increment=10000)
-    # for group in pb.iterator(groups):
-    #     for x, y in combinations(group, 2):
-    #         ratio = compare(rttls, x, y, mincommon=args.common)
-    #         if ratio >= args.threshold:
-    #             g.add_edge(x, y)
-    # with File2(args.output, 'wt') as f:
-    #     for i, group in enumerate(sorted(nx.connected_components(g), key=lambda x: (-len(x), x)), 1):
-    #         f.write('node N{}:  {}\n'.format(i, ' '.join(group)))
+    comp = Compare(pairs, rttls, v, args.acceptance_threshold)
+    comp.infer_aliases(args.output)
 
 if __name__ == '__main__':
     main()
